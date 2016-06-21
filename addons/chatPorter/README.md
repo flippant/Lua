@@ -1,5 +1,5 @@
-#ChatPorter v1.33  
-####written by Ragnarok.Ikonic  
+#ChatPorter v1.39  
+####written by Ikonic  
 
 Displays tell, party, and linkshell chat to alternate character and optional textbox.  
 Also, allows you to reply from either character.  
@@ -35,6 +35,7 @@ Currently only tested and supporting two characters.
 //cp [l|p|t] color # : Sets color of l|p|t text (acceptable values of 1-255).  
 //cp [l|p|t|f] show : Toggles l|p|t|f textboxes from showing.  
 //cp [l|p|t|f] clear : Clears l|p|t|f textbox.  
+//cp clear : Clears all textboxes.  
 //cp [l|p|t|f] lines # : Sets # of lines to show in textbox.  
 //cp [l|p|t|f] [fontname|fn] * : Sets fontname for textbox.  
 //cp [l|p|t|f] [fontsize|fs] # : Sets fontsize for textbox.  
@@ -59,3 +60,7 @@ Currently only tested and supporting two characters.
 * v1.33 06/09/13 Added textbox support for ffochat.  
 * v1.34 08/16/13 Changed include 'colors' to include 'chat' to make it current.  
 * v1.35 12/21/13 Updated textboxes to fix after recent update.  
+* v1.36 12/22/13 Added some missing ffochat info.  
+* v1.37 01/09/14 Redid how some settings are displayed, fixed chatboxes so they display again, fixed colors display option (//cp colors), and removed some extra code.  
+* v1.38 01/18/14 Minor tell textbox fix.  
+* v1.39 11/30/15 Fixed issue preventing chat from others from showing in textboxes.  
