@@ -35,13 +35,14 @@ function set_language(lang)
     end
     if lang and type(lang) == 'string' and (lang == 'english' or lang == 'japanese') then
         rawset(_G,'language',lang)
+        refresh_globals()
     else
         error('\nGearSwap: set_language() was passed an invalid value ('..tostring(lang)..'). (must be a string)', 2)
     end
 end
 
 function debug_mode(boolean)
-    if boolean == true or boolean == false then _settings.debug_mode = boolean
+    if type(boolean) == "boolean" then _settings.debug_mode = boolean
     elseif boolean == nil then
         _settings.debug_mode = true
     else
@@ -50,7 +51,7 @@ function debug_mode(boolean)
 end
 
 function show_swaps(boolean)
-    if boolean == true or boolean == false then _settings.show_swaps = boolean
+    if type(boolean) == "boolean" then _settings.show_swaps = boolean
     elseif boolean == nil then
         _settings.show_swaps = true
     else
@@ -63,7 +64,7 @@ function cancel_spell(boolean)
         error('\nGearSwap: cancel_spell() is only valid in the precast, pretarget, or filtered_action functions', 2)
         return
     end
-    if boolean == true or boolean == false then _global.cancel_spell = boolean
+    if type(boolean) == "boolean" then _global.cancel_spell = boolean
     elseif boolean == nil then
         _global.cancel_spell = true
     else
@@ -93,7 +94,7 @@ function cast_delay(delay)
         return
     end
     if tonumber(delay) then
-        _global.cast_delay = tonumber(delay)
+        _global[_global.current_event.."_cast_delay"] = tonumber(delay)
     else
         error('\nGearSwap: cast_delay() was passed an invalid value ('..tostring(delay)..'). (cast delay must be a number of seconds)', 2)
     end
@@ -128,7 +129,6 @@ function enable(...)
     if type(enable_tab[1]) == 'table' then
         enable_tab = enable_tab[1] -- Compensates for people passing a table instead of a series of strings.
     end
-    --items = windower.ffxi.get_items()
     local sending_table = {}
     for i,v in pairs(enable_tab) do
         local local_slot = get_default_slot(v)
@@ -180,36 +180,36 @@ function print_set(set,title)
         end
     elseif table.length(set) == 0 then
         if title then
-            windower.add_to_chat(1,'------------------'.. windower.to_shift_jis(tostring(title))..' -- Empty Table -----------------')
+            msg.add_to_chat(1,'------------------'.. windower.to_shift_jis(tostring(title))..' -- Empty Table -----------------')
         else
-            windower.add_to_chat(1,'-------------------------- Empty Table -------------------------')
+            msg.add_to_chat(1,'-------------------------- Empty Table -------------------------')
         end
         return
     end
     
     if title then
-        windower.add_to_chat(1,'------------------------- '..windower.to_shift_jis(tostring(title))..' -------------------------')
+        msg.add_to_chat(1,'------------------------- '..windower.to_shift_jis(tostring(title))..' -------------------------')
     else
-        windower.add_to_chat(1,'----------------------------------------------------------------')
+        msg.add_to_chat(1,'----------------------------------------------------------------')
     end
     if #set == table.length(set) then
         for i,v in ipairs(set) do
             if type(v) == 'table' and v.name then
-                windower.add_to_chat(8,windower.to_shift_jis(tostring(i))..' '..windower.to_shift_jis(tostring(v.name))..' (Adv.)')
+                msg.add_to_chat(8,windower.to_shift_jis(tostring(i))..' '..windower.to_shift_jis(tostring(v.name))..' (Adv.)')
             else
-                windower.add_to_chat(8,windower.to_shift_jis(tostring(i))..' '..windower.to_shift_jis(tostring(v)))
+                msg.add_to_chat(8,windower.to_shift_jis(tostring(i))..' '..windower.to_shift_jis(tostring(v)))
             end
         end
     else
         for i,v in pairs(set) do
             if type(v) == 'table' and v.name then
-                windower.add_to_chat(8,windower.to_shift_jis(tostring(i))..' '..windower.to_shift_jis(tostring(v.name))..' (Adv.)')
+                msg.add_to_chat(8,windower.to_shift_jis(tostring(i))..' '..windower.to_shift_jis(tostring(v.name))..' (Adv.)')
             else
-                windower.add_to_chat(8,windower.to_shift_jis(tostring(i))..' '..windower.to_shift_jis(tostring(v)))
+                msg.add_to_chat(8,windower.to_shift_jis(tostring(i))..' '..windower.to_shift_jis(tostring(v)))
             end
         end
     end
-    windower.add_to_chat(1,'----------------------------------------------------------------')
+    msg.add_to_chat(1,'----------------------------------------------------------------')
 end
 
 function send_cmd_user(command)
@@ -258,12 +258,19 @@ function user_equip_sets(func)
         end,user_env)
 end
 
+function user_unhandled_command(func)
+    if type(func) ~= 'function' then
+        error('\nGearSwap: unhandled_command was passed an invalid value ('..tostring(func)..'). (must be a function)', 2)
+    end
+    unhandled_command_events[#unhandled_command_events+1] = setfenv(func,user_env)
+end
+
 function include_user(str, load_include_in_this_table)
     if not (type(str) == 'string') then
         error('\nGearSwap: include() was passed an invalid value ('..tostring(str)..'). (must be a string)', 2)
     end
     
-    if T{'bit','socket'}:contains(str:lower()) then
+    if T{'bit','socket','mime'}:contains(str:lower()) then
         return _G[str:lower()]
     elseif T{'pack'}:contains(str:lower()) then
         return
@@ -314,8 +321,8 @@ function user_midaction(bool)
     end
 
     for i,v in pairs(command_registry) do
-        if v.midaction then
-            return true
+        if type(v) == 'table' and v.midaction then
+            return true, v.spell
         end
     end
     
@@ -333,7 +340,7 @@ function user_pet_midaction(bool)
 
     for i,v in pairs(command_registry) do
         if v.pet_midaction then
-            return true
+            return true, v.spell
         end
     end
 
@@ -341,11 +348,20 @@ function user_pet_midaction(bool)
 end
 
 function add_to_chat_user(num,str)
-    if not num then num = 8 end
+    local backup_str
+    if type(num) == 'string' then
+        -- It was passed a string as the first argument.
+        str = not tonumber(str) and str or num
+        num = 8
+    elseif not num and str and type(str) == 'string' then
+        -- It only needs the number.
+        num=8
+    end
+    
     if language == 'japanese' then
-        windower.add_to_chat(num,windower.to_shift_jis(str))
+        msg.add_to_chat(num,windower.to_shift_jis(str))
     else
-        windower.add_to_chat(num,str)
+        msg.add_to_chat(num,str)
     end
 end
 

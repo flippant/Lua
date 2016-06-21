@@ -34,7 +34,7 @@ require 'pack'
 
 _addon.name = 'PointWatch'
 _addon.author = 'Byrth'
-_addon.version = 0.062014
+_addon.version = 0.150201
 _addon.command = 'pw'
 
 settings = config.load('data\\settings.xml',default_settings)
@@ -45,8 +45,6 @@ box.current_string = ''
 box:show()
 
 initialize()
-
-
 
 windower.register_event('incoming chunk',function(id,org,modi,is_injected,is_blocked)
     if is_injected then return end
@@ -102,16 +100,23 @@ windower.register_event('incoming chunk',function(id,org,modi,is_injected,is_blo
     elseif id == 0x61 then
         xp.current = org:unpack('H',0x11)
         xp.tnl = org:unpack('H',0x13)
+        accolades.current = math.floor(org:byte(0x5A)/4) + org:byte(0x5B)*2^6 + (org:byte(0x5C)%4)*2^14
     elseif id == 0x63 and org:byte(5) == 2 then
         lp.current = org:unpack('H',9)
         lp.number_of_merits = org:byte(11)%64
         lp.maximum_merits = org:byte(0x0D)%64
     elseif id == 0x63 and org:byte(5) == 5 then
-        local offset = windower.ffxi.get_player().main_job_id*4+13 -- So WAR (ID==1) starts at byte 17
+        local offset = windower.ffxi.get_player().main_job_id*6+13 -- So WAR (ID==1) starts at byte 19
         cp.current = org:unpack('H',offset)
         cp.number_of_job_points = org:byte(offset+2)
     elseif id == 0x110 then
         sparks.current = org:unpack('H',5)
+    elseif id == 0xB and box:visible() then
+        zoning_bool = true
+        box:hide()
+    elseif id == 0xA and zoning_bool then
+        zoning_bool = nil
+        box:show()
     end
 end)
 
@@ -135,11 +140,15 @@ end)
 
 windower.register_event('addon command',function(...)
     local commands = {...}
-    local first_cmd = table.remove(commands,1)
-    if approved_commands[first_cmd] then
+    local first_cmd = table.remove(commands,1):lower()
+    if approved_commands[first_cmd] and #commands >= approved_commands[first_cmd].n then
         local tab = {}
-        for i,v in pairs(commands) do
+        for i,v in ipairs(commands) do
             tab[i] = tonumber(v) or v
+            if i <= approved_commands[first_cmd].n and type(tab[i]) ~= approved_commands[first_cmd].t then
+                print('Pointwatch: texts library command ('..first_cmd..') requires '..approved_commands[first_cmd].n..' '..approved_commands[first_cmd].t..'-type input'..(approved_commands[first_cmd].n > 1 and 's' or ''))
+                return
+            end
         end
         texts[first_cmd](box,unpack(tab))
         settings.text_box_settings = box._settings
@@ -241,7 +250,7 @@ zone_message_functions = {
     pearl_ebon_gold_silvery = function(p1,p2,p3,p4)
         abyssea.pearlescent = p1
         abyssea.ebon = p2
-        abyssea.gold = p3
+        abyssea.golden = p3
         abyssea.silvery = p4
     end,
     azure_ruby_amber = function(p1,p2,p3,p4)
@@ -265,16 +274,25 @@ function exp_msg(val,msg)
     if msg == 718 or msg == 735 then
         cp.registry[t] = (cp.registry[t] or 0) + val
         cp.total = cp.total + val
-    elseif msg == 8 or msg == 105 or msg == 371 or msg == 372 then
+    elseif msg == 8 or msg == 105 then
         xp.registry[t] = (xp.registry[t] or 0) + val
         xp.total = xp.total + val
-        xp.current = xp.current + val
-        if xp.current > xp.tnl and xp.tnl ~= 56000 then
-            xp.current = xp.current - xp.tnl
+        xp.current = math.min(xp.current + val,55999)
+        -- 98 to 99 is 56000 XP, so 55999 is the most you can ever have
+        if xp.current > xp.tnl then
             -- I have capped all jobs, but I assume that a 0x61 packet is sent after you
-            --  level up, which will update the TNL and make this adjustment meaningless.
-        elseif xp.current > xp.tnl then
-            lp.current = lp.current + xp.current - xp.tnl + 1
+            -- level up, which will update the TNL and make this adjustment meaningless.
+            xp.current = xp.current - xp.tnl
+        end
+    elseif msg == 371 or msg == 372 then
+        lp.registry[t] = (lp.registry[t] or 0) + val
+        if lp.current + val >= lp.tnm and lp.number_of_merits ~= lp.maximum_merits then
+            -- Merit Point gained!
+            lp.current = lp.current + val - lp.tnm
+            lp.number_of_merits = lp.number_of_merits + 1
+        else
+            -- If a merit point was not gained, 
+            lp.current = math.min(lp.current+val,lp.tnm-1)
         end
     end
     update_box()

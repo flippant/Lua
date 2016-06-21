@@ -2,7 +2,7 @@
 
 _addon.name = 'Scoreboard'
 _addon.author = 'Suji'
-_addon.version = '1.07'
+_addon.version = '1.10'
 _addon.commands = {'sb', 'scoreboard'}
 
 require('tables')
@@ -294,6 +294,9 @@ end
 
 -- Resets application state
 function reset()
+    if settings.resetfilters then
+        dps_db:clear_filters()
+    end
     display:reset()
     dps_clock:reset()
     dps_db:reset()
@@ -332,7 +335,7 @@ function get_ally_mob_ids()
     local party = windower.ffxi.get_party()
 
     for _, member in pairs(party) do
-        if member.mob then
+        if type(member) == 'table' and member.mob then
             allies:append(member.mob.id)
             if member.mob.pet_index and member.mob.pet_index> 0 and windower.ffxi.get_mob_by_index(member.mob.pet_index) then
                 allies:append(windower.ffxi.get_mob_by_index(member.mob.pet_index).id)
@@ -351,9 +354,10 @@ function mob_is_ally(mob_id)
 end
 
 
-windower.register_event('action', function(raw_action)
-    local action = Action(raw_action)
-    local category = action:get_category_string()
+function action_handler(raw_actionpacket)
+    local actionpacket = ActionPacket.new(raw_actionpacket)
+    
+    local category = actionpacket:get_category_string()
 
     local player = windower.ffxi.get_player()
     local pet
@@ -371,120 +375,76 @@ windower.register_event('action', function(raw_action)
         return
     end
     
-    if mob_is_ally(action.raw.actor_id) then
-        if category == 'melee' then
-            for target in action:get_targets() do
-                for subaction in target:get_actions() do
-                    -- hit, crit
-                    if subaction.message == 1 or subaction.message == 67 then
-                        if subaction.message == 67 then
-                            dps_db:add_m_crit(target:get_name(), create_mob_name(action), subaction.param)
-                        else
-                            dps_db:add_m_hit(target:get_name(), create_mob_name(action), subaction.param)
-                        end
-                        
-                        -- enspells etc
-                        if subaction.has_add_effect and T{163, 229}:contains(subaction.add_effect_message) then
-                            dps_db:add_damage(target:get_name(), create_mob_name(action), subaction.add_effect_param)
-                        end
-                    elseif subaction.message == 15 or subaction.message == 63 then
-                        dps_db:incr_misses(target:get_name(), create_mob_name(action))
+    for target in actionpacket:get_targets() do
+        for subactionpacket in target:get_actions() do
+            if (mob_is_ally(actionpacket.raw.actor_id) and not mob_is_ally(target.raw.id)) then
+                -- Ignore actions within the alliance, but parse all alliance-outwards or outwards-alliance packets.
+                local main  = subactionpacket:get_basic_info()
+                local add   = subactionpacket:get_add_effect()
+                local spike = subactionpacket:get_spike_effect()
+                if main.message_id == 1 then
+                    dps_db:add_m_hit(target:get_name(), create_mob_name(actionpacket), main.param)
+                elseif main.message_id == 67 then
+                    dps_db:add_m_crit(target:get_name(), create_mob_name(actionpacket), main.param)
+                elseif main.message_id == 15 or main.message_id == 63 then
+                    dps_db:incr_misses(target:get_name(), create_mob_name(actionpacket))
+                elseif main.message_id == 353 then
+                    dps_db:add_r_crit(target:get_name(), create_mob_name(actionpacket), main.param)
+                elseif T{157, 352, 576, 577}:contains(main.message_id) then
+                    dps_db:add_r_hit(target:get_name(), create_mob_name(actionpacket), main.param)
+                elseif main.message_id == 353 then
+                    dps_db:add_r_crit(target:get_name(), create_mob_name(actionpacket), main.param)
+                elseif main.message_id == 354 then
+                    dps_db:incr_r_misses(target:get_name(), create_mob_name(actionpacket))
+                elseif main.resource and main.resource == 'weapon_skills' and main.conclusion then
+                    dps_db:add_ws_damage(target:get_name(), create_mob_name(actionpacket), main.param, main.spell_id)
+                elseif main.conclusion then
+                    if main.conclusion.subject == 'target' and T(main.conclusion.objects):contains('HP') and main.param ~= 0 then
+                        dps_db:add_damage(target:get_name(), create_mob_name(actionpacket), (main.conclusion.verb == 'gains' and -1 or 1)*main.param)
                     end
                 end
-            end
-        elseif category == 'weaponskill_finish' then
-            -- TODO: need to map whatever id into the actual ws name
-        
-            for target in action:get_targets() do
-                for subaction in target:get_actions() do
-                    dps_db:add_ws_damage(target:get_name(), action:get_actor_name(), subaction.param, action.raw.param)
-
-                    -- skillchains
-                    if subaction.has_add_effect then
-                        local actor_name = action:get_actor_name()
-                        local sc_name = string.format("Skillchain(%s%s)", actor_name:sub(1, 3),
+                
+                if add and add.conclusion then
+                    local actor_name = create_mob_name(actionpacket)
+                    if T{196,223,288,289,290,291,292,
+                        293,294,295,296,297,298,299,
+                        300,301,302,385,386,387,388,
+                        389,390,391,392,393,394,395,
+                        396,397,398,732}:contains(add.message_id) then
+                        actor_name = string.format("Skillchain(%s%s)", actor_name:sub(1, 3),
                                                       actor_name:len() > 3 and '.' or '')
-                        dps_db:add_damage(target:get_name(), sc_name, subaction.add_effect_param)
+                    end
+                    if add.conclusion.subject == 'target' and T(add.conclusion.objects):contains('HP') and add.param ~= 0 then
+                        dps_db:add_damage(target:get_name(), actor_name, (add.conclusion.verb == 'gains' and -1 or 1)*add.param)
                     end
                 end
-            end
-        elseif category == 'spell_finish' then
-            for target in action:get_targets() do
-                for subaction in target:get_actions() do
-                    if T{2, 252, 264, 650}:contains(subaction.message) then
-                        dps_db:add_damage(target:get_name(), create_mob_name(action), subaction.param)
+                if spike and spike.conclusion then
+                    if spike.conclusion.subject == 'target' and T(spike.conclusion.objects):contains('HP') and spike.param ~= 0 then
+                        dps_db:add_damage(target:get_name(), create_mob_name(actionpacket), (spike.conclusion.verb == 'gains' and -1 or 1)*spike.param)
                     end
                 end
-            end
-        elseif category == 'ranged_finish' then
-            for target in action:get_targets() do
-                for subaction in target:get_actions() do
-                    -- barrage(157), ranged, crit, squarely, truestrike
-                    if T{157, 352, 353, 576, 577}:contains(subaction.message) then
-                        if subaction.message == 353 then
-                            dps_db:add_r_crit(target:get_name(), action:get_actor_name(), subaction.param)
-                        else
-                            dps_db:add_r_hit(target:get_name(), action:get_actor_name(), subaction.param)
-                        end                    
-                        
-                        -- holy bolts etc
-                        if subaction.has_add_effect and T{163, 229}:contains(subaction.add_effect_message) then
-                            dps_db:add_damage(target:get_name(), action:get_actor_name(), subaction.add_effect_param)
-                        end
-                    elseif subaction.message == 354 then
-                        dps_db:incr_r_misses(target:get_name(), action:get_actor_name())
-                    end
-                end
-            end
-        elseif category == 'job_ability' or category == 'job_ability_unblinkable' or category == 'job_ability_run' then
-            for target in action:get_targets() do
-                for subaction in target:get_actions() do
-                    -- sange(77), generic damage ja(110), other generic dmg ja (317), stun ja (522)
-                    if T{77, 110, 317, 522}:contains(subaction.message) then
-                        dps_db:add_damage(target:get_name(), action:get_actor_name(), subaction.param)
-                    end
-                end
-            end
-        elseif category == 'avatar_tp_finish' then
-            for target in action:get_targets() do
-                for subaction in target:get_actions() do
-                    if subaction.message == 317 then
-                        dps_db:add_damage(target:get_name(), create_mob_name(action), subaction.param)
-                    end
-                end
-            end
-        elseif category == 'mob_tp_finish' then
-            for target in action:get_targets() do
-                for subaction in target:get_actions() do
-                    if subaction.message == 185 or subaction.message == 264 then
-                        dps_db:add_damage(target:get_name(), create_mob_name(action), subaction.param)
-                    end
-                end
-            end        
-        end
-    elseif category == 'melee' then
-        -- This is some non-ally action packet. We need to see if they are hitting someone
-        -- in this alliance, and if so, accumulate any damage from spikes/counters/etc.
-        for target in action:get_targets() do
-            if mob_is_ally(target.id) then
-                for subaction in target:get_actions() do
-                    if subaction.has_spike_effect then
-                        dps_db:add_damage(action:get_actor_name(), target:get_name(), subaction.spike_effect_param)
+            elseif (mob_is_ally(target.raw.id) and not mob_is_ally(actionpacket.raw.actor_id)) then
+                local spike = subactionpacket:get_spike_effect()
+                if spike and spike.conclusion then
+                    if spike.conclusion.subject == 'actor' and T(spike.conclusion.objects):contains('HP') and spike.param ~= 0 then
+                        dps_db:add_damage(create_mob_name(actionpacket), target:get_name(), (spike.conclusion.verb == 'loses' and 1 or -1)*spike.param)
                     end
                 end
             end
         end
     end
-end)
+end
 
-function find_pet_owner_name(action)
-    local pet = windower.ffxi.get_mob_by_id(action:get_id())
+ActionPacket.open_listener(action_handler)
+
+function find_pet_owner_name(actionpacket)
+    local pet = windower.ffxi.get_mob_by_id(actionpacket:get_id())
     local party = windower.ffxi.get_party()
     
     local name = nil
     
     for _, member in pairs(party) do
-        if member.mob then
+        if type(member) == 'table' and member.mob then
             if member.mob.pet_index and member.mob.pet_index> 0 and pet.index == member.mob.pet_index then
 				name = member.mob.name
                 break
@@ -494,10 +454,10 @@ function find_pet_owner_name(action)
     return name
 end
 
-function create_mob_name(action)
-    local actor = action:get_actor_name()
+function create_mob_name(actionpacket)
+    local actor = actionpacket:get_actor_name()
     local result = ''
-    local owner = find_pet_owner_name(action)
+    local owner = find_pet_owner_name(actionpacket)
     if owner ~= nil then
         if string.len(actor) > 8 then
             result = string.sub(actor, 1, 7)..'.'
@@ -513,7 +473,7 @@ end
 
 config.register(settings, function(settings)
     update_dps_clock:loop(settings.UpdateFrequency)
-    display:visibility(windower.ffxi.get_info().logged_in)
+    display:visibility(display.visible and windower.ffxi.get_info().logged_in)
 end)
 
 

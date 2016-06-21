@@ -36,11 +36,12 @@
 function check_wearable(item_id)
     if not item_id or item_id == 0 then -- 0 codes for an empty slot, but Arcon will probably make it nil at some point
     elseif not res.items[item_id] then
-        debug_mode_chat("Item "..item_id.." has not been added to resources yet.")
+        msg.debugging("Item "..item_id.." has not been added to resources yet.")
     elseif not res.items[item_id].jobs then -- Make sure item can be equipped by specific jobs (unlike pearlsacks).
-        --debug_mode_chat('GearSwap (Debug Mode): Item '..(res.items[item_id][language] or item_id)..' does not have a jobs field in the resources.')
+        --msg.debugging('GearSwap (Debug Mode): Item '..(res.items[item_id][language] or item_id)..' does not have a jobs field in the resources.')
     else
-        return (res.items[item_id].jobs[player.main_job_id]) and (res.items[item_id].level<=player.main_job_level) and (res.items[item_id].races[player.race_id])
+        return (res.items[item_id].jobs[player.main_job_id]) and (res.items[item_id].level<=player.jobs[res.jobs[player.main_job_id].ens]) and (res.items[item_id].races[player.race_id]) and
+            (player.superior_level >= (res.items[item_id].superior_level or 0))
     end
     return false
 end
@@ -79,7 +80,7 @@ function expand_entry(entry)
     local augments,name,priority,bag
     if type(entry) == 'table' and entry == empty then
         name = empty
-    elseif type(entry) == 'table' and entry.name then
+    elseif type(entry) == 'table' and entry.name and type(entry.name) == 'string' then
         name = entry.name
         priority = entry.priority
         if entry.augments then
@@ -109,7 +110,7 @@ end
 function unpack_equip_list(equip_list)
     local ret_list = {}
     local error_list = {}
-    local priorities = setmetatable({},{__newindex=prioritize})
+    local priorities = Priorities:new()
     for slot_id,slot_name in pairs(default_slot_map) do
         local name,priority,extgoal_1,extgoal_2 = expand_entry(equip_list[slot_name])
         priorities[slot_id] = priority
@@ -122,8 +123,8 @@ function unpack_equip_list(equip_list)
     local inventories = {[0]=items.inventory,[8]=items.wardrobe}
     
     for bag_id,inventory in pairs(inventories) do
-        for _,item_tab in pairs(inventory) do
-            if check_wearable(item_tab.id) then
+        for _,item_tab in ipairs(inventory) do
+            if type(item_tab) == 'table' and check_wearable(item_tab.id) then
                 if item_tab.status == 0 or item_tab.status == 5 then -- Make sure the item is either equipped or not otherwise committed. eliminate_redundant will take care of the already-equipped gear.
                     for slot_id,slot_name in pairs(default_slot_map) do
                         -- equip_list[slot_name] can also be a table (that doesn't contain a "name" property) or a number, which are both cases that should not generate any kind of equipment changing.
@@ -135,7 +136,7 @@ function unpack_equip_list(equip_list)
                             if (not bag or bag == bag_id) and name and name_match(item_tab.id,name) then
                                 if res.items[item_tab.id].slots[slot_id] then
                                     if augments and #augments ~=0 then
-                                        if compare_augments(augments,extdata.decode(item_tab).augments) then
+                                        if extdata.compare_augments(augments,extdata.decode(item_tab).augments) then
                                             equip_list[slot_name] = nil
                                             ret_list[slot_id] = {bag_id=bag_id,slot=item_tab.slot}
                                             break
@@ -178,7 +179,7 @@ function unpack_equip_list(equip_list)
                         if not res.items[item_tab.id].jobs[player.main_job_id] then
                             equip_list[slot_name] = nil
                             error_list[slot_name] = name..' (cannot be worn by this job)'
-                        elseif not (res.items[item_tab.id].level<=player.main_job_level) then
+                        elseif not (res.items[item_tab.id].level<=player.jobs[player.main_job]) then
                             equip_list[slot_name] = nil
                             error_list[slot_name] = name..' (job level is too low)'
                         elseif not res.items[item_tab.id].races[player.race_id] then
@@ -200,57 +201,6 @@ function unpack_equip_list(equip_list)
     end
     
     return ret_list,priorities
-end
-
-
------------------------------------------------------------------------------------
---Name: compare_augments(goal,current)
---Args:
----- goal - First set of augments
----- current - Second set of augments
------------------------------------------------------------------------------------
---Returns:
----- boolean indicating whether the goal augments are contained within the
-----    current augments. Will return false if there are excess goal augments
-----    or the goal augments do not match the current augments.
------------------------------------------------------------------------------------
-function compare_augments(goal,current)
-    if not current then return false end
-    local num_augments = 0
-    local aug_strip = function(str)
-        return str:lower():gsub('[^%-%w,]','')
-    end 
-    for aug_ind,augment in pairs(current) do
-        if augment == 'none' then
-            current[aug_ind] = nil
-        else
-            num_augments = num_augments + 1
-        end
-    end
-    if num_augments < #goal then
-        return false
-    else
-        local count = 0
-        for goal_ind,goal_aug in pairs(goal) do
-            local bool
-            for cur_ind,cur_aug in pairs(current) do
-                if aug_strip(goal_aug) == aug_strip(cur_aug) then
-                    bool = true
-                    count = count +1
-                    current[cur_ind] = nil
-                    break
-                end
-            end
-            if not bool then
-                return false
-            end
-        end
-        if count == #goal then
-            return true
-        else
-            return false
-        end
-    end
 end
 
 
@@ -301,7 +251,7 @@ function to_names_set(equipment)
     
     for ind,cur_item in pairs(equipment) do
         local name = 'empty'
-        if cur_item.slot ~= empty then
+        if type(cur_item) == 'table' and cur_item.slot ~= empty then
             if items[to_windower_api(res.bags[cur_item.bag_id].english)][cur_item.slot].id == 0 then return {} end
             -- refresh_player() can run after equip packets arrive but before the item array is fully loaded,
             -- which results in the id still being the initialization value.
@@ -331,6 +281,7 @@ end
 ---- none
 -----------------------------------------------------------------------------------
 function equip_piece(eq_slot_id,bag_id,inv_slot_id)
+    -- Many complicated, wow!
     local cur_eq_tab = items.equipment[toslotname(eq_slot_id)]
     
     if cur_eq_tab.slot ~= empty then
@@ -338,14 +289,10 @@ function equip_piece(eq_slot_id,bag_id,inv_slot_id)
     end
     
     if inv_slot_id ~= empty then
- --       windower.packets.inject_outgoing(0x50,string.char(0x50,0x04,0,0,inv_slot_id,eq_slot_id,bag_id,0))
-        
         items.equipment[toslotname(eq_slot_id)] = {slot=inv_slot_id,bag_id=bag_id}
         items[to_windower_api(res.bags[bag_id].english)][inv_slot_id].status = 5
         return string.char(inv_slot_id,eq_slot_id,bag_id,0)
     else
---        windower.packets.inject_outgoing(0x50,string.char(0x50,0x04,0,0,0,eq_slot_id,0,0))
-        
         items.equipment[toslotname(eq_slot_id)] = {slot=empty,bag_id=0}
         return string.char(0,eq_slot_id,0,0)
     end

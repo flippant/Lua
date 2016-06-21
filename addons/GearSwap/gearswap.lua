@@ -25,15 +25,19 @@
 --SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 _addon.name = 'GearSwap'
-_addon.version = '0.890'
+_addon.version = '0.901'
 _addon.author = 'Byrth'
 _addon.commands = {'gs','gearswap'}
 
 if windower.file_exists(windower.addon_path..'data/bootstrap.lua') then
-    debugging = {windower_debug = true,command_registry = false,general=false}
+    debugging = {windower_debug = true,command_registry = false,general=false,logging=false}
 else
     debugging = {}
 end
+
+__raw = {lower = string.lower, upper = string.upper, debug=windower.debug,text={create=windower.text.create,
+    delete=windower.text.delete,registry = {}},prim={create=windower.prim.create,delete=windower.prim.delete,registry={}}}
+
 
 language = 'english'
 file = require 'files'
@@ -41,13 +45,65 @@ require 'strings'
 require 'tables'
 require 'lists'
 require 'sets'
+
+windower.text.create = function (str)
+    if __raw.text.registry[str] then
+        msg.addon_msg(123,'Text object cannot be created because it already exists.')
+    else
+        __raw.text.registry[str] = true
+        __raw.text.create(str)
+    end
+end
+
+windower.text.delete = function (str)
+    if __raw.text.registry[str] then
+        local deleted = false
+        if windower.text.saved_texts then
+            for i,v in pairs(windower.text.saved_texts) do
+                if v._name == str then
+                    __raw.text.registry[str] = nil
+                    windower.text.saved_texts[i]:destroy()
+                    deleted = true
+                    break
+                end
+            end
+        end
+        if not deleted then
+            __raw.text.registry[str] = nil
+            __raw.text.delete(str)
+        end
+    else
+        __raw.text.delete(str)
+    end
+end
+
+windower.prim.create = function (str)
+    if __raw.prim.registry[str] then
+        msg.addon_msg(123,'Primitive cannot be created because it already exists.')
+    else
+        __raw.prim.registry[str] = true
+        __raw.prim.create(str)
+    end
+end
+
+windower.prim.delete = function (str)
+    if __raw.prim.registry[str] then
+        __raw.prim.registry[str] = nil
+        __raw.prim.delete(str)
+    else
+        __raw.prim.delete(str)
+    end
+end
+
 texts = require 'texts'
 require 'pack'
 bit = require 'bit'
 socket = require 'socket'
+mime = require 'mime'
 res = require 'resources'
 extdata = require 'extdata'
 require 'helper_functions'
+require 'actions'
 
 -- Resources Checks
 if res.items and res.bags and res.slots and res.statuses and res.jobs and res.elements and res.skills and res.buffs and res.spells and res.job_abilities and res.weapon_skills and res.monster_abilities and res.action_messages and res.skills and res.monstrosity and res.weather and res.moon_phases and res.races then
@@ -67,12 +123,6 @@ require 'triggers'
 
 windower.register_event('load',function()
     windower.debug('load')
-    if windower.dir_exists('../addons/GearSwap/data/logs') then
-        logging = false
-        logfile = io.open('../addons/GearSwap/data/logs/NormalLog'..tostring(os.clock())..'.log','w+')
-        logit('GearSwap LOGGER HEADER\n')
-    end
-    
     refresh_globals()
     
     if world.logged_in then
@@ -92,49 +142,50 @@ windower.register_event('addon command',function (...)
     logit('\n\n'..tostring(os.clock)..table.concat({...},' '))
     local splitup = {...}
     if not splitup[1] then return end -- handles //gs
-    local cmd = splitup[1]:lower()
+    
+    for i,v in pairs(splitup) do splitup[i] = windower.from_shift_jis(windower.convert_auto_trans(v)) end
+
+    local cmd = table.remove(splitup,1):lower()
     
     if cmd == 'c' then
         if gearswap_disabled then return end
-        if splitup[2] then
+        if splitup[1] then
             refresh_globals()
-            equip_sets('self_command',nil,_raw.table.concat(splitup,' ',2,#splitup))
+            equip_sets('self_command',nil,_raw.table.concat(splitup,' '))
         else
-            windower.add_to_chat(123,'GearSwap: No self command passed.')
+            msg.addon_msg(123,'No self command passed.')
         end
     elseif cmd == 'equip' then
         if gearswap_disabled then return end
-        local key_list = parse_set_to_keys(table.slice(splitup, 2))
+        local key_list = parse_set_to_keys(splitup)
         local set = get_set_from_keys(key_list)
         if set then
             refresh_globals()
             equip_sets('equip_command',nil,set)
         else
-            windower.add_to_chat(123,'GearSwap: Equip command cannot be completed. That set does not exist.')
+            msg.addon_msg(123,'Equip command cannot be completed. That set does not exist.')
         end
     elseif cmd == 'export' then
-        table.remove(splitup,1)
         export_set(splitup)
     elseif cmd == 'validate' then
         if user_env and user_env.sets then
             refresh_globals()
-            table.remove(splitup, 1)
             validate(splitup)
         else
-            windower.add_to_chat(123,'GearSwap: There is nothing to validate because there is no file loaded.')
+            msg.addon_msg(123,'There is nothing to validate because there is no file loaded.')
         end
     elseif cmd == 'l' or cmd == 'load' then
-        if splitup[2] then
-            local f_name = table.concat(splitup,' ',2)
+        if splitup[1] then
+            local f_name = table.concat(splitup,' ')
             if pathsearch({f_name}) then
                 refresh_globals()
-                command_registry = {}
+                command_registry = Command_Registry.new()
                 load_user_files(false,f_name)
             else
-                windower.add_to_chat(123,'GearSwap: File not found.')
+                msg.addon_msg(123,'File not found.')
             end
         else
-            windower.add_to_chat(123,'GearSwap: No file name was provided.')
+            msg.addon_msg(123,'No file name was provided.')
         end
     elseif cmd == 'enable' then
         disenable(splitup,command_enable,'enable',false)
@@ -152,25 +203,46 @@ windower.register_event('addon command',function (...)
         _settings.show_swaps = not _settings.show_swaps
         print('GearSwap: Show Swaps set to '..tostring(_settings.show_swaps)..'.')
     elseif _settings.debug_mode and strip(cmd) == 'eval' then
-        table.remove(splitup,1)
         assert(loadstring(table.concat(splitup,' ')))()
     else
-        print('GearSwap: Command not found')
+        local handled = false
+        if not gearswap_disabled then
+            for i,v in ipairs(unhandled_command_events) do
+                handled = equip_sets(v,nil,cmd,unpack(splitup))
+                if handled then break end
+            end
+        end
+        if not handled then
+            print('GearSwap: Command not found')
+        end
     end
 end)
 
 function disenable(tab,funct,functname,pol)
-    if tab[2] and tab[2]:lower()=='all' then
+    local slot_name = ''
+    local ltab = L{}
+    for i,v in pairs(tab) do
+        ltab:append(v:gsub('[^%a_%d]',''):lower())
+    end
+    if ltab:contains('all') then
         funct('main','sub','range','ammo','head','neck','lear','rear','body','hands','lring','rring','back','waist','legs','feet')
         print('GearSwap: All slots '..functname..'d.')
-    elseif tab[2]  then
-        for i=2,#tab do
-            if slot_map[tab[i]:gsub('[^%a_%d]',''):lower()] then
-                funct(tab[i]:gsub('[^%a_%d]',''):lower())
-                print('GearSwap: '..tab[i]:gsub('[^%a_%d]',''):lower()..' slot '..functname..'d.')
+    elseif ltab.n > 0  then
+        local found = L{}
+        local not_found = L{}
+        for slot_name in ltab:it() do
+            if slot_map[slot_name] then
+                funct(slot_name)
+                found:append(slot_name)
             else
-                print('GearSwap: Unable to find slot '..tostring(tab[i])..'.')
+                not_found:append(slot_name)
             end
+        end
+        if found.n > 0 then
+            print('GearSwap: '..found:tostring()..' slot'..(found.n>1 and 's' or '')..' '..functname..'d.')
+        end
+        if not_found.n > 0 then
+            print('GearSwap: Unable to find slot'..(not_found.n>1 and 's' or '')..' '..not_found:tostring()..'.')
         end
     elseif gearswap_disabled ~= pol and not tab[2] then
         print('GearSwap: User file '..functname..'d')
@@ -209,18 +281,26 @@ windower.register_event('incoming chunk',function(id,data,modified,injected,bloc
     if injected then
     elseif id == 0x00A then
         windower.debug('zone change')
-        player.name = data:unpack('z',0x85)
+        command_registry = Command_Registry.new()
+        table.clear(not_sent_out_equip)
+        
         player.id = data:unpack('I',0x05)
         player.index = data:unpack('H',0x09)
-        player.main_job = data:byte(0xB5)
-        player.sub_job = data:byte(0xB8)
+        if player.main_job_id and player.main_job_id ~= data:byte(0xB5) and player.name and player.name == data:unpack('z',0x85) then
+            windower.debug('job change on zone')
+            load_user_files(data:byte(0xB5))
+        else
+            player.name = data:unpack('z',0x85)
+        end
+        player.main_job_id = data:byte(0xB5)
+        player.sub_job_id = data:byte(0xB8)
         player.vitals.max_hp = data:unpack('I',0xE9)
         player.vitals.max_mp = data:unpack('I',0xED)
+        player.max_hp = data:unpack('I',0xE9)
+        player.max_mp = data:unpack('I',0xED)
         update_job_names()
         
         world.zone_id = data:unpack('H',0x31)
-        not_sent_out_equip = {}
-        command_registry = {}
         _ExtraData.world.conquest = false
         for i,v in pairs(region_to_zone_map) do
             if v:contains(world.zone_id) then
@@ -231,7 +311,7 @@ windower.register_event('incoming chunk',function(id,data,modified,injected,bloc
                 break
             end
         end
-        world.weather_id = data:byte(0x69)
+        weather_update(data:byte(0x69))
         world.logged_in = true
         
         _ExtraData.world.in_mog_house = data:byte(0x81) == 1
@@ -243,7 +323,7 @@ windower.register_event('incoming chunk',function(id,data,modified,injected,bloc
         local oldstatus = pet.status
         local status_id = data:byte(32)
         -- Filter all statuses aside from Idle/Engaged/Dead/Engaged dead.
-        if status_id < 4 then
+        if status_id < 4 or status_id == 33 or status_id == 47 then
             local newstatus = copy_entry(res.statuses[status_id])
             if newstatus and newstatus[language] then
                 newstatus = newstatus[language]
@@ -267,7 +347,7 @@ windower.register_event('incoming chunk',function(id,data,modified,injected,bloc
                 not_sent_out_equip[slot_name] = nil
             end
             if encumbrance_table[slot_id] and not tf then
-                debug_mode_chat("Your "..slot_name.." slot is now unlocked.")
+                msg.debugging("Your "..slot_name.." slot is now unlocked.")
             end
             encumbrance_table[slot_id] = tf
         end
@@ -304,75 +384,15 @@ windower.register_event('incoming chunk',function(id,data,modified,injected,bloc
         items[bag][slot].extdata = data:sub(0x12,0x29)
         -- Did not mess with linkshell stuff
     elseif id == 0x28 then
-        data = data:sub(5)
-        local act = {}
---        act.do_not_need = get_bit_packed(data,0,8)
-        act.actor_id = get_bit_packed(data,8,40)
-        act.target_count = get_bit_packed(data,40,50)
-        act.category = get_bit_packed(data,50,54)
-        act.param = get_bit_packed(data,54,70)
-        act.unknown = get_bit_packed(data,70,86)
-        act.recast = get_bit_packed(data,86,118)
-        act.targets = {}
-        local offset = 118
-        for i = 1,act.target_count do
-            act.targets[i] = {}
-            act.targets[i].id = get_bit_packed(data,offset,offset+32)
-            act.targets[i].action_count = get_bit_packed(data,offset+32,offset+36)
-            offset = offset + 36
-            act.targets[i].actions = {}
-            for n = 1,act.targets[i].action_count do
-                act.targets[i].actions[n] = {}
-                act.targets[i].actions[n].reaction = get_bit_packed(data,offset,offset+5)
-                act.targets[i].actions[n].animation = get_bit_packed(data,offset+5,offset+16)
-                act.targets[i].actions[n].effect = get_bit_packed(data,offset+16,offset+21)
-                act.targets[i].actions[n].stagger = get_bit_packed(data,offset+21,offset+27)
-                act.targets[i].actions[n].param = get_bit_packed(data,offset+27,offset+44)
-                act.targets[i].actions[n].message = get_bit_packed(data,offset+44,offset+54)
-                act.targets[i].actions[n].unknown = get_bit_packed(data,offset+54,offset+85)
-                act.targets[i].actions[n].has_add_effect = get_bit_packed(data,offset+85,offset+86)
-                offset = offset + 86
-                if act.targets[i].actions[n].has_add_effect == 1 then
-                    act.targets[i].actions[n].has_add_effect = true
-                    act.targets[i].actions[n].add_effect_animation = get_bit_packed(data,offset,offset+6)
-                    act.targets[i].actions[n].add_effect_effect = get_bit_packed(data,offset+6,offset+10)
-                    act.targets[i].actions[n].add_effect_param = get_bit_packed(data,offset+10,offset+27)
-                    act.targets[i].actions[n].add_effect_message = get_bit_packed(data,offset+27,offset+37)
-                    offset = offset + 37
-                else
-                    act.targets[i].actions[n].has_add_effect = false
-                    act.targets[i].actions[n].add_effect_animation = 0
-                    act.targets[i].actions[n].add_effect_effect = 0
-                    act.targets[i].actions[n].add_effect_param = 0
-                    act.targets[i].actions[n].add_effect_message = 0
-                end
-                act.targets[i].actions[n].has_spike_effect = get_bit_packed(data,offset,offset+1)
-                offset = offset +1
-                if act.targets[i].actions[n].has_spike_effect == 1 then
-                    act.targets[i].actions[n].has_spike_effect = true
-                    act.targets[i].actions[n].spike_effect_animation = get_bit_packed(data,offset,offset+6)
-                    act.targets[i].actions[n].spike_effect_effect = get_bit_packed(data,offset+6,offset+10)
-                    act.targets[i].actions[n].spike_effect_param = get_bit_packed(data,offset+10,offset+24)
-                    act.targets[i].actions[n].spike_effect_message = get_bit_packed(data,offset+24,offset+34)
-                    offset = offset + 34
-                else
-                    act.targets[i].actions[n].has_spike_effect = false
-                    act.targets[i].actions[n].spike_effect_animation = 0
-                    act.targets[i].actions[n].spike_effect_effect = 0
-                    act.targets[i].actions[n].spike_effect_param = 0
-                    act.targets[i].actions[n].spike_effect_message = 0
-                end
-            end
-        end
-        inc_action(act)
+        inc_action(windower.packets.parse_action(data))
     elseif id == 0x29 then
         if gearswap_disabled then return end
         local arr = {}
         arr.actor_id = data:unpack('I',0x05)
         arr.target_id = data:unpack('I',0x09)
         arr.param_1 = data:unpack('I',0x0D)
-        arr.param_2 = get_bit_packed(data,128,134) -- First 6 bits
-        arr.param_3 = get_bit_packed(data,134,160) -- Rest
+        arr.param_2 = data:unpack('I',0x11)%64 -- First 6 bits
+        arr.param_3 = math.floor(data:unpack('I',0x11)/64) -- Rest
         arr.actor_index = data:unpack('H',0x15)
         arr.target_index = data:unpack('H',0x17)
         arr.message_id = data:unpack('H',0x19)%32768
@@ -416,6 +436,17 @@ windower.register_event('incoming chunk',function(id,data,modified,injected,bloc
             refresh_globals()
             equip_sets('indi_change',nil,temp_indi,false)
         end
+
+        local subj_ind = data:unpack('H', 0x35) / 8
+        if subj_ind == 0 and pet.isvalid then
+            if not next_packet_events then next_packet_events = {sequence_id = data:unpack('H',3)} end
+            refresh_globals()
+            pet.isvalid = false
+            next_packet_events.pet_change = {pet = table.reassign({},pet)}
+        elseif subj_ind ~= 0 and not pet.isvalid then
+            if not next_packet_events then next_packet_events = {sequence_id = data:unpack('H',3)} end
+            next_packet_events.pet_change = {subj_ind = subj_ind}
+        end
     elseif id == 0x044 then
         -- No idea what this is doing
     elseif id == 0x050 then
@@ -454,6 +485,8 @@ windower.register_event('incoming chunk',function(id,data,modified,injected,bloc
     elseif id == 0x061 then
         player.vitals.max_hp = data:unpack('I',5)
         player.vitals.max_mp = data:unpack('I',9)
+        player.max_hp = data:unpack('I',5)
+        player.max_mp = data:unpack('I',9)
         player.main_job_id = data:byte(13)
         player.main_job_level = data:byte(14)
         
@@ -478,31 +511,30 @@ windower.register_event('incoming chunk',function(id,data,modified,injected,bloc
                 player.skills[to_windower_api(current_skill.english)] = skill
             end
         end
-    elseif id == 0x067 then
-        local flag_1 = data:byte(5)
-        local flag_2 = data:byte(6)
-        local owner_ind = data:unpack('H',13)
-        local subj_ind = data:unpack('H',7)
-                
-        if flag_1 == 3 and flag_2 == 5 and windower.ffxi.get_player().index == owner_ind and not pet.isvalid then
-            if not next_packet_events then next_packet_events = {sequence_id = data:unpack('H',3)} end
-            next_packet_events.pet_change = {subj_ind = subj_ind}
-        elseif flag_1 == 4 and flag_2 == 5 and windower.ffxi.get_player().index == subj_ind then
-            if not next_packet_events then next_packet_events = {sequence_id = data:unpack('H',3)} end
-            refresh_globals()
-            pet.isvalid = false
-            next_packet_events.pet_change = {pet = table.reassign({},pet)}
-        elseif flag_2 == 7 and windower.ffxi.get_player().index == subj_ind and not pet.isvalid then
-            if not next_packet_events then next_packet_events = {sequence_id = data:unpack('H',3)} end
-            pet.isvalid = true
-            next_packet_events.pet_change = {subj_ind = owner_ind}
-        end
-    elseif id == 0x0DF then
+    elseif id == 0x0DF and data:unpack('I',5) == player.id then
         player.vitals.hp = data:unpack('I',9)
         player.vitals.mp = data:unpack('I',13)
         player.vitals.tp = data:unpack('I',0x11)
         player.vitals.hpp = data:byte(0x17)
         player.vitals.mpp = data:byte(0x18)
+        
+        player.hp = data:unpack('I',9)
+        player.mp = data:unpack('I',13)
+        player.tp = data:unpack('I',0x11)
+        player.hpp = data:byte(0x17)
+        player.mpp = data:byte(0x18)
+    elseif id == 0x0E2 and data:unpack('I',5)==player.id then
+        player.vitals.hp = data:unpack('I',9)
+        player.vitals.mp = data:unpack('I',0xB)
+        player.vitals.tp = data:unpack('I',0x11)
+        player.vitals.hpp = data:byte(0x1E)
+        player.vitals.mpp = data:byte(0x1F)
+        
+        player.hp = data:unpack('I',9)
+        player.mp = data:unpack('I',0xB)
+        player.tp = data:unpack('I',0x11)
+        player.hpp = data:byte(0x1E)
+        player.mpp = data:byte(0x1F)
     elseif id == 0x117 then
         for i=0x49,0x85,4 do
             local arr = data:sub(i,i+3)
@@ -538,15 +570,15 @@ windower.register_event('gain buff',function(buff_id)
     
     -- Need to figure out what I'm going to do with this:
     if T{'terror','sleep','stun','petrification','charm','weakness'}:contains(buff_name:lower()) then
-        for i,v in pairs(command_registry) do
+        for ts,v in pairs(command_registry) do
             if v.midaction then
-                command_registry[i] = nil
+                command_registry:delete_entry(ts)
             end
         end
     end
     
     refresh_globals()
-    equip_sets('buff_change',nil,buff_name,true)
+    equip_sets('buff_change',nil,buff_name,true,copy_entry(res.buffs[buff_id]))
 end)
 
 windower.register_event('lose buff',function(buff_id)
@@ -557,7 +589,7 @@ windower.register_event('lose buff',function(buff_id)
     windower.debug('lose buff '..buff_name..' ('..tostring(buff_id)..')')
     if gearswap_disabled then return end
     refresh_globals()
-    equip_sets('buff_change',nil,buff_name,false)
+    equip_sets('buff_change',nil,buff_name,false,copy_entry(res.buffs[buff_id]))
 end)
 
 windower.register_event('login',function(name)

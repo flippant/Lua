@@ -45,10 +45,8 @@ function refresh_globals(user_event_flag)
     if not user_event_flag or dt > 0.05 then
         refresh_player(dt,user_event_flag)
         refresh_ffxi_info(dt,user_event_flag)
-        if not user_event_flag or dt > 0.5 then
-            refresh_group_info(dt,user_event_flag)
-            last_refresh = current
-        end
+        refresh_group_info(dt,user_event_flag)
+        last_refresh = current
     end
 end
 
@@ -64,23 +62,41 @@ end
 function load_user_files(job_id,user_file)
     job_id = tonumber(job_id)
 
-    user_pcall('file_unload')
+    if job_id and res.jobs[job_id] then
+        user_pcall('file_unload',res.jobs[job_id][language..'_short'])
+    end
     
-    for i,v in pairs(registered_user_events) do
-        windower.unregister_event(i)
+    for i in pairs(registered_user_events) do
+        unregister_event_user(i)
+    end
+    
+    for i in pairs(__raw.text.registry) do
+        windower.text.delete(i)
+    end
+    
+    for i in pairs(__raw.prim.registry) do
+        windower.prim.delete(i)
     end
     
     user_env = nil
-    registered_user_events = {}
+    unhandled_command_events = {}
+    --registered_user_events = {}
     include_user_path = nil
-
+    
     language = 'english' -- Reset language to english when changing job files.
+    refresh_globals()
+    
+    if job_id and res.jobs[job_id] then
+        player.main_job_id = job_id
+        update_job_names()
+    end
+    
     
     local path
     path = pathsearch({user_file})
     if not path then
-        local long_job = res.jobs[job_id][language]
-        local short_job = res.jobs[job_id][language..'_short']
+        local long_job = res.jobs[job_id].english
+        local short_job = res.jobs[job_id].english_short
         local tab = {player.name..'_'..short_job..'.lua',player.name..'-'..short_job..'.lua',
             player.name..'_'..long_job..'.lua',player.name..'-'..long_job..'.lua',
             player.name..'.lua',short_job..'.lua',long_job..'.lua','default.lua'}
@@ -93,13 +109,14 @@ function load_user_files(job_id,user_file)
         sets = nil
         return
     end
-    user_env = {gearswap = _G, _global = _global, _settings = _settings,
+    user_env = {gearswap = _G, _global = _global, _settings = _settings,_addon=_addon,
         -- Player functions
         equip = equip, cancel_spell=cancel_spell, change_target=change_target, cast_delay=cast_delay,
         print_set=print_set,set_combine=set_combine,disable=disable,enable=user_enable,
         send_command=send_cmd_user,windower=user_windower,include=include_user,
         midaction=user_midaction,pet_midaction=user_pet_midaction,set_language=set_language,
         show_swaps = show_swaps,debug_mode=debug_mode,include_path=user_include_path,
+        register_unhandled_command=user_unhandled_command,
         
         -- Library functions
         string=string,math=math,table=table,set=set,list=list,T=T,S=S,L=L,pack=pack,
@@ -131,7 +148,7 @@ function load_user_files(job_id,user_file)
     local funct, err = loadfile(path)
     
     -- If the file cannot be loaded, print the error and load the default.
-    if funct == nil then 
+    if funct == nil then
         print('User file problem: '..err)
         current_job_file = nil
         gearswap_disabled = true
@@ -154,7 +171,8 @@ function load_user_files(job_id,user_file)
         return nil
     end
     
-    _global.cast_delay = 0
+    _global.pretarget_cast_delay = 0
+    _global.precast_cast_delay = 0
     _global.cancel_spell = false
     _global.current_event = 'get_sets'
     user_pcall('get_sets')
@@ -248,7 +266,7 @@ function refresh_player(dt,user_event_flag)
                 pet.element = res.elements[-1][language] -- Physical
             end
         else
-            table.reassign(pet, {isvalid=true})
+            table.reassign(pet, {isvalid=false})
         end
     else
         table.reassign(pet, {isvalid=false})
@@ -309,8 +327,13 @@ function refresh_player(dt,user_event_flag)
         if species_id then
             player.species = {}
             for i,v in pairs(res.monstrosity[species_id]) do
-                if i ~= 'id' then
-                    player.species[i] = v
+                player.species[i] = v
+            end
+            player.species.name = player.species[language] 
+            player.species.tp_moves = copy_entry(res.monstrosity[species_id].tp_moves)
+            for i,v in pairs(player.species.tp_moves) do
+                if v > player.main_job_level then
+                    player.species.tp_moves[i] = nil
                 end
             end
         end
@@ -354,11 +377,7 @@ function refresh_ffxi_info(dt,user_event_flag)
             world.zone = res.zones[v][language]
             world.area = world.zone
         elseif i == 'weather' and res.weather[v] then
-            world.weather_id = v
-            world.weather = res.weather[v][language]
-            world.real_weather = world.weather
-            world.weather_element = res.elements[res.weather[v].element][language]
-            world.real_weather_element = world.weather_element
+            weather_update(v)
         elseif i == 'day' and res.days[v] then
             world.day = res.days[v][language]
             world.day_element = res.elements[res.days[v].element][language]
@@ -370,32 +389,6 @@ function refresh_ffxi_info(dt,user_event_flag)
             world[i] = v
         end
     end
-
-    if buffactive[178] then
-        world.weather = res.weather[4][language]
-        world.weather_element = res.elements[0][language]
-    elseif buffactive[179] then
-        world.weather = res.weather[12][language]
-        world.weather_element = res.elements[1][language]
-    elseif buffactive[180] then
-        world.weather = res.weather[10][language]
-        world.weather_element = res.elements[2][language]
-    elseif buffactive[181] then
-        world.weather = res.weather[8][language]
-        world.weather_element = res.elements[3][language]
-    elseif buffactive[182] then
-        world.weather = res.weather[14][language]
-        world.weather_element = res.elements[4][language]
-    elseif buffactive[183] then
-        world.weather = res.weather[6][language]
-        world.weather_element = res.elements[5][language]
-    elseif buffactive[184] then
-        world.weather = res.weather[16][language]
-        world.weather_element = res.elements[6][language]
-    elseif buffactive[185] then
-        world.weather = res.weather[18][language]
-        world.weather_element = res.elements[7][language]
-    end
     
     for global_variable_name,extradatatable in pairs(_ExtraData) do
         if _G[global_variable_name] then
@@ -404,6 +397,69 @@ function refresh_ffxi_info(dt,user_event_flag)
             end
         end
     end
+end
+
+
+-----------------------------------------------------------------------------------
+--Name: weather_update(id)
+--Args:
+---- id  Current weather ID
+-----------------------------------------------------------------------------------
+--Returns:
+---- None, updates the table.
+-----------------------------------------------------------------------------------
+function weather_update(id)
+    world.weather_id = id
+    world.real_weather_id = id
+    world.real_weather = res.weather[id][language]
+    world.real_weather_element = res.elements[res.weather[id].element][language]
+    local buff = false
+    if buffactive[178] then
+        buff = true
+        world.weather_id = 4
+    elseif buffactive[179] then
+        buff = true
+        world.weather_id = 12
+    elseif buffactive[180] then
+        buff = true
+        world.weather_id = 10
+    elseif buffactive[181] then
+        buff = true
+        world.weather_id = 8
+    elseif buffactive[182] then
+        buff = true
+        world.weather_id = 14
+    elseif buffactive[183] then
+        buff = true
+        world.weather_id = 6
+    elseif buffactive[184] then
+        buff = true
+        world.weather_id = 16
+    elseif buffactive[185] then
+        buff = true
+        world.weather_id = 18
+    elseif buffactive[589] then
+        world.weather_id = 5
+    elseif buffactive[590] then
+        world.weather_id = 13
+    elseif buffactive[591] then
+        world.weather_id = 11
+    elseif buffactive[592] then
+        world.weather_id = 9
+    elseif buffactive[593] then
+        world.weather_id = 15
+    elseif buffactive[594] then
+        world.weather_id = 7
+    elseif buffactive[595] then
+        world.weather_id = 17
+    elseif buffactive[596] then
+        world.weather_id = 19
+    end
+    if buff and world.weather_id == world.real_weather_id then
+        world.weather_id = world.weather_id + 1
+    end
+    world.weather = res.weather[world.weather_id][language]
+    world.weather_element = res.elements[res.weather[world.weather_id].element][language]
 end
 
 
@@ -425,7 +481,7 @@ function refresh_group_info(dt,user_event_flag)
     
     local j = windower.ffxi.get_party() or {}
     for i,v in pairs(j) do
-        if v.mob and v.mob.race then
+        if type(v) == 'table' and v.mob and v.mob.race then
             v.mob.race_id = v.mob.race
             v.mob.race = res.races[v.mob.race][language]
         end
@@ -524,7 +580,7 @@ end
 function refresh_item_list(itemlist)
     retarr = make_user_table()
     for i,v in pairs(itemlist) do
-        if v.id and v.id ~= 0 then
+        if type(v) == 'table' and v.id and v.id ~= 0 then
             -- If we don't already have the primary item name in the table, add it.
             if res.items[v.id] and res.items[v.id][language] and not retarr[res.items[v.id][language]] then
                 -- We add the entry as a sub-table containing the id and count
@@ -562,7 +618,6 @@ function refresh_user_env(job_id)
         windower.send_command('@wait 1;lua i '.._addon.name..' refresh_user_env')
     else
         load_user_files(job_id)
-        --windower.send_command('@wait 0.5;lua i '.._addon.name..' load_user_files '..job_id)
     end
 end
 
@@ -628,3 +683,4 @@ function pathsearch(files_list)
     return false
 end
 
+-- Much force update

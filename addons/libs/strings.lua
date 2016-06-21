@@ -1,18 +1,21 @@
 --[[
-A few string helper functions.
+    A few string helper functions.
 ]]
 
 _libs = _libs or {}
 _libs.strings = true
 _libs.functions = _libs.functions or require('functions')
+_libs.math = _libs.math or require('maths')
 
 _meta = _meta or {}
 
-debug.getmetatable('').__index = function(str, k)
-    return string[k] or type(k) == 'number' and string.sub(str, k, k) or nil
-end
-debug.getmetatable('').__unm = functions.negate .. functions.equals
-debug.getmetatable('').__unp = functions.equals
+debug.setmetatable('', {
+    __index = function(str, k)
+        return string[k] or type(k) == 'number' and string.sub(str, k, k) or (_raw and _raw.error or error)('"%s" is not defined for strings':format(tostring(k)), 2)
+    end,
+    __unm = functions.negate .. functions.equals,
+    __unp = functions.equals,
+})
 
 -- Returns a function that returns the string when called.
 function string.fn(str)
@@ -104,26 +107,6 @@ end
 -- Inserts a string into a given section of another string.
 function string.splice(str, from, to, str2)
     return str:sub(1, from - 1)..str2..str:sub(to + 1)
-end
-
--- Returns a monowidth hex representation of each character of a string, optionally with a separator between chars.
-function string.hex(str, sep, from, to)
-    return str:slice(from, to):split():map(string.zfill-{2}..math.hex..string.byte):concat(sep or '')
-end
-
--- Returns a monowidth binary representation of every char of the string, optionally with a separator between chars.
-function string.binary(str, sep, from, to)
-    return str:slice(from, to):split():map(string.zfill-{8}..math.binary..string.byte):concat(sep or '')
-end
-
--- Returns a string parsed from a hex-represented string.
-function string.parse_hex(str)
-    return (str:gsub('%s*0x', ''):gsub('[^%w]', ''):gsub('%w%w', string.char..tonumber-{16}))
-end
-
--- Returns a string parsed from a binary-represented string.
-function string.parse_binary(str)
-    return (str:gsub('%s*0b', ''):gsub('[^%w]', ''):gsub(('[01]'):rep(8), string.char..tonumber-{2}))
 end
 
 -- Returns an iterator, that goes over every character of the string.
@@ -219,6 +202,43 @@ function string.empty(str)
     return str == ''
 end
 
+(function()
+    -- Returns a monowidth hex representation of each character of a string, optionally with a separator between chars.
+    local hex = string.zfill-{2} .. math.hex .. string.byte
+    function string.hex(str, sep, from, to)
+        return str:slice(from, to):split():map(hex):concat(sep or '')
+    end
+
+    -- Returns a monowidth binary representation of every char of the string, optionally with a separator between chars.
+    local binary = string.zfill-{8} .. math.binary .. string.byte
+    function string.binary(str, sep, from, to)
+        return str:slice(from, to):split():map(binary):concat(sep or '')
+    end
+
+    -- Returns a string parsed from a hex-represented string.
+    local hex_r = string.char .. tonumber-{16}
+    function string.parse_hex(str)
+        local interpreted_string = str:gsub('0x', ''):gsub('[^%w]', '')
+        if #interpreted_string % 2 ~= 0  then
+            (_raw and _raw.error or error)('Invalid input string length', 2)
+        end
+
+        return (interpreted_string:gsub('%w%w', hex_r))
+    end
+
+    -- Returns a string parsed from a binary-represented string.
+    local binary_r = string.char .. tonumber-{2}
+    local binary_pattern = '[01]':rep(8)
+    function string.parse_binary(str)
+        local interpreted_string = str:gsub('0b', ''):gsub('[^01]', '')
+        if #interpreted_string % 8 ~= 0 then
+            (_raw and _raw.error or error)('Invalid input string length', 2)
+        end
+
+        return (interpreted_string:gsub(binary_pattern, binary_r))
+    end
+end)()
+
 -- Returns a string with Lua pattern characters escaped.
 function string.escape(str)
     return (str:gsub('[[%]%%^$*()%.%+?-]', '%%%1'))
@@ -237,7 +257,7 @@ function string.mfind(str, full_pattern, ...)
     local patterns = full_pattern:split('|')
 
     local found = {}
-    for pattern in ipairs(patterns) do
+    for _, pattern in ipairs(patterns) do
         local new_found = {str:find(pattern, ...)}
         if not found[1] or new_found[1] and new_found[1] < found[1] then
             found = new_found
@@ -253,7 +273,7 @@ function string.mmatch(str, full_pattern, ...)
 
     local found = {}
     local index = nil
-    for pattern in ipairs(patterns) do
+    for _, pattern in ipairs(patterns) do
         local start = {str:find(pattern, ...)}
         if start and (not index or start < index) then
             found = {str:match(pattern, ...)}
@@ -268,7 +288,7 @@ end
 function string.mgsub(str, full_pattern, ...)
     local patterns = full_pattern:split('|')
 
-    for pattern in ipairs(patterns) do
+    for _, pattern in ipairs(patterns) do
         str = str:gsub(pattern, ...)
     end
 
@@ -447,20 +467,36 @@ function table.format(t, trail, subs)
     local last
     if trail == 'and' then
         last = ' and '
-    elseif trail == 'csv' then
+    elseif trail == 'or' then
+        last = ' or '
+    elseif trail == 'list' then
         last = ', '
+    elseif trail == 'csv' then
+        last = ','
     elseif trail == 'oxford' then
         last = ', and '
+    elseif trail == 'oxford or' then
+        last = ', or '
     else
         warning('Invalid format for table.format: \''..trail..'\'.')
     end
 
     local res = ''
     for k, v in pairs(t) do
-        res = res .. tostring(v)
+        local add = tostring(v)
+        if trail == 'csv' and add:match('[,"]') then
+            res = res .. add:gsub('"', '""'):enclose('"')
+        else
+            res = res .. add
+        end
+
         if next(t, k) then
             if next(t, next(t, k)) then
-                res = res .. ', '
+                if trail == 'csv' then
+                    res = res .. ','
+                else
+                    res = res .. ', '
+                end
             else
                 res = res .. last
             end
@@ -471,7 +507,7 @@ function table.format(t, trail, subs)
 end
 
 --[[
-Copyright (c) 2013, Windower
+Copyright © 2013-2015, Windower
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:

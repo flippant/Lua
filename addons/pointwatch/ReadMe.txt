@@ -14,6 +14,9 @@ Text Box Commands:
 * bg_transparency <number> - Changes the background transparency. Number should be between 0 and 1
 ** pos_x, pos_y, pad, transparency, alpha, and bg_alpha are also valid commands and are documented in the texts library.
 
+Other Commands:
+* message_printing - See FIXING POINTWATCH.txt in this directory for a full explanation.
+
 
 
 Strings Options:  
@@ -42,6 +45,9 @@ Here are the available values:
 * sparks.current          = Current number of RoE Sparks (number between 0 and 50,000)
 * sparks.maximum          = Maximum number of RoE Sparks (always 50,000)
 
+* accolades.current       = Current number of Unity Accolades (number between 0 and 50,000)
+* accolades.maximum       = Maximum number of Unity Accolades (always 50,000)
+
 * dynamis.KIs             = Series of Xs and Os indicating whether or not you have the 5 KIs.
 * dynamis.entry_time      = Your Dynamis entry time, in seconds. -- If the addon is loaded in dynamis, this will be the time of addon load.
 * dynamis.time_limit      = Your current Dynamis time limit, in seconds. -- If the addon is loaded in dynamis, you will need to gain a KI for this to be accurate.
@@ -51,7 +57,7 @@ Here are the available values:
 * abyssea.azure           = Azure light estimation
 * abyssea.ruby            = Ruby light estimation
 * abyssea.pearlescent     = Pearlescent light estimation
-* abyssea.gold            = Gold light estimation
+* abyssea.golden          = Gold light estimation
 * abyssea.silvery         = Silvery light estimation
 * abyssea.ebon            = Ebon light estimation
 * abyssea.last_time       = The last time you got a time message, in seconds.  -- Not implemented
@@ -61,6 +67,10 @@ Here are the available values:
 
 
 Version History:
+0.150201 - Added Unity Accolades.
+0.141111 - Adjusted Pointwatch to account for a recent packet change.
+0.141101 - Reversed my versioning scheme, adjusted the limit point and experience point calculations slightly.
+0.101214 - Made pointwatch hide itself while zoning.
 0.062014 - Added lp.maximum_merits.
 0.050214 - Fixed the Dynamis clock. Added Abyssea lights.
 0.042314 - Addition of strings system

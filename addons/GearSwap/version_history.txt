@@ -1,4 +1,22 @@
 -------------------------------------------------
+GearSwap 0.901 - Modified add_to_chat handling throughout GearSwap so it would show up in a consistent log (the same one as mode 1)
+-------------------------------------------------
+GearSwap 0.900 - Adjusted GearSwap to be compatible with the new library behavior.
+-------------------------------------------------
+GearSwap 0.899 - Adjusted GearSwap to be compatible with the new library behavior.
+-------------------------------------------------
+GearSwap 0.898 - Fixed a bug with using cast_delay in the pretarget function.
+-------------------------------------------------
+GearSwap 0.897 - Superior system support and filtering.
+-------------------------------------------------
+GearSwap 0.896 - Command_registry class addition.
+-------------------------------------------------
+GearSwap 0.894 - Various bugfixes (including Monstrosity loading).
+-------------------------------------------------
+GearSwap 0.892 - Proxied primitive and text commands.
+-------------------------------------------------
+GearSwap 0.891 - Fixed a few bugs with /item commands. Exposed the _addon table.
+-------------------------------------------------
 GearSwap 0.890 - Added support for enchanted items in Wardrobe. Added a filter for enchanted items/armors. Made resources tables static.
 -------------------------------------------------
 GearSwap 0.880 - Accommodated booleans and numbers in equip commands. Fixed world.conquest.strengths.

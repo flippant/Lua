@@ -10,6 +10,9 @@ function parse_action_packet(act)
     end
     act.actor = player_info(act.actor_id)
     act.action = get_spell(act) -- Pulls the resources line for the action
+    if not act.action then
+        return act
+    end
     for i,v in ipairs(act.targets) do
         v.target = {}
         v.target[1] = player_info(v.id)
@@ -181,7 +184,7 @@ function parse_action_packet(act)
                 elseif m.message == 435 or m.message == 436 then m.simp_name = act.action.name..' (JAs)'
                 elseif m.message == 437 or m.message == 438 then m.simp_name = act.action.name..' (JAs and TP)'
                 elseif m.message == 439 or m.message == 440 then m.simp_name = act.action.name..' (SPs, JAs, TP, and MP)'
-                elseif T{252,265,268,269,271,272,274,275}:contains(m.message) then m.simp_name = 'Magic Burst! '..act.action.name
+                elseif T{252,265,268,269,271,272,274,275,379,650}:contains(m.message) then m.simp_name = 'Magic Burst! '..act.action.name
                 elseif not act.action then 
                    m.simp_name = ''
                    act.action = {}
@@ -288,7 +291,7 @@ function parse_action_packet(act)
                 elseif m.spike_effect_message == 535 then
                     m.simp_spike_name = 'from retaliation'
                 else
-                    m.simp_spike_name = 'spikes' 
+                    m.simp_spike_name = 'spikes'
                 end
 
                 local msg = simplify_message(m.spike_effect_message)
@@ -328,7 +331,7 @@ function simplify_message(msg_ID)
     local msg = res.action_messages[msg_ID][language]
     local fields = fieldsearch(msg)
 
-    if simplify and not T{23,64,125,129,133,139,140,153,204,244,350,453,531,557,565,582,593,594,595,596,597,598,599,674}:contains(msg_ID) then
+    if simplify and not T{23,64,125,129,133,139,140,153,204,210,211,212,213,214,244,350,442,453,516,531,557,565,582,593,594,595,596,597,598,599,674}:contains(msg_ID) then
         if T{93,273,522,653,654,655,656,85,284,75,114,156,189,248,283,312,323,336,351,355,408,422,423,425,659,158,245,324,658}:contains(msg_ID) then
             fields.status = true
         end
@@ -405,43 +408,43 @@ end
 
 function player_info(id)
     local player_table = windower.ffxi.get_mob_by_id(id)
-    local typ,owner,filter
+    local typ,owner,filt
     
     if player_table == nil then
         return {name=nil,id=nil,is_npc=nil,type='debug',owner=nil,race=nil}
     end
     
     for i,v in pairs(windower.ffxi.get_party()) do
-        if v.mob and v.mob.id == player_table.id then
+        if type(v) == 'table' and v.mob and v.mob.id == player_table.id then
             typ = i
             if i == 'p0' then
-                filter = 'me'
+                filt = 'me'
             elseif i:sub(1,1) == 'p' then
-                filter = 'party'
+                filt = 'party'
             else
-                filter = 'alliance'
+                filt = 'alliance'
             end
         end
     end
     
-    if not filter then
+    if not filt then
         if player_table.is_npc then
             if player_table.id%4096>2047 then
                 typ = 'other_pets'
-                filter = 'other_pets'
+                filt = 'other_pets'
                 owner = 'other'
                 for i,v in pairs(windower.ffxi.get_party()) do
-                    if v.mob and v.mob.pet_index and v.mob.pet_index == player_table.index then
+                    if type(v) == 'table' and v.mob and v.mob.pet_index and v.mob.pet_index == player_table.index then
                         if i == 'p0' then
                             typ = 'my_pet'
-                            filter = 'my_pet'
+                            filt = 'my_pet'
                         end
                         owner = i
                         break
-                    elseif v.mob and v.mob.fellow_index and v.mob.fellow_index == player_table.index then
+                    elseif type(v) == 'table' and v.mob and v.mob.fellow_index and v.mob.fellow_index == player_table.index then
                         if i == 'p0' then
                             typ = 'my_fellow'
-                            filter = 'my_fellow'
+                            filt = 'my_fellow'
                         end
                         owner = i
                         break
@@ -449,26 +452,26 @@ function player_info(id)
                 end
             else
                 typ = 'mob'
-                filter = 'monsters'
+                filt = 'monsters'
                 for i,v in pairs(windower.ffxi.get_party()) do
-                    if nf(v.mob,'id') == player_table.claim_id and filter.enemies then
-                        filter = 'enemies'
+                    if type(v) == 'table' and nf(v.mob,'id') == player_table.claim_id and filter.enemies then
+                        filt = 'enemies'
                     end
                 end
             end
         else
             typ = 'other'
-            filter = 'others'
+            filt = 'others'
         end
     end
     if not typ then typ = 'debug' end
-    return {name=player_table.name,id=id,is_npc = player_table.is_npc,type=typ,filter=filter,owner=(owner or nil),race = player_table.race}
+    return {name=player_table.name,id=id,is_npc = player_table.is_npc,type=typ,filter=filt,owner=(owner or nil),race = player_table.race}
 end
 
 function get_spell(act)
     local spell, abil_ID, effect_val = {}
     local msg_ID = act.targets[1].actions[1].message
-    
+
     if T{7,8,9}:contains(act['category']) then
         abil_ID = act.targets[1].actions[1].param
     elseif T{3,4,5,6,11,13,14,15}:contains(act.category) then
@@ -547,7 +550,7 @@ function get_spell(act)
             spell = res.job_abilities[76] -- 'Trick Attack'
             spell.name = color_it(spell[language],color_arr.abilcol)
             spell.ability = color_it(spell[language],color_arr.abilcol)
-        elseif msg_ID == 311 or msg_ID == 311 then
+        elseif msg_ID == 311 or msg_ID == 312 then
             spell = res.job_abilities[79] -- 'Cover'
             spell.name = color_it(spell[language],color_arr.abilcol)
             spell.ability = color_it(spell[language],color_arr.abilcol)
@@ -556,14 +559,16 @@ function get_spell(act)
             spell.name = color_it(spell[language],color_arr.abilcol)
             spell.ability = color_it(spell[language],color_arr.abilcol)
         end
-        
+
         if fields.item then
             if T{125,593,594,595,596,597,598,599}:contains(msg_ID) then
                 spell.item = color_it(res.items[effect_val]['english_log'], color_arr.itemcol)
             else
                 spell = res.items[abil_ID]
-                spell.name = color_it(spell['english_log'],color_arr.itemcol)
-                spell.item = color_it(spell['english_log'],color_arr.itemcol)
+                if spell then
+                    spell.name = color_it(spell['english_log'],color_arr.itemcol)
+                    spell.item = color_it(spell['english_log'],color_arr.itemcol)
+                end
             end
         end
         
@@ -576,7 +581,7 @@ function get_spell(act)
         end
     end
     
-    if not spell.name then spell.name = spell[language] end
+    if spell and not spell.name then spell.name = spell[language] end
     return spell
 end
 

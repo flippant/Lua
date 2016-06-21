@@ -1,4 +1,4 @@
---Copyright (c) 2013, Byrthnoth
+--Copyright (c) 2014, Byrthnoth
 --All rights reserved.
 
 --Redistribution and use in source and binary forms, with or without
@@ -41,20 +41,14 @@ function valid_target(targ,flag)
     local spell_targ
     local san_targ = find_san(targ)
     -- If the target is whitelisted, pass it through.
-    if pass_through_targs:contains(targ) then
-        local cur_targ = windower.ffxi.get_mob_by_target('<t>')
-        if (targ == '<t>' or targ == 't') and cur_targ and cur_targ.id == windower.ffxi.get_player().id then
-            return '<me>'
-        end
-        return targ
-    elseif st_targs:contains(targ) or (tonumber(targ) and windower.ffxi.get_mob_by_id(tonumber(targ))) then
+    if pass_through_targs:contains(targ) or st_targs:contains(targ) or (tonumber(targ) and windower.ffxi.get_mob_by_id(tonumber(targ))) then
         return targ
     elseif targ and windower.ffxi.get_player() then
     -- If the target exists, scan the mob array for it
         local current_target = windower.ffxi.get_mob_by_target('t')
         local targar = {}
         for i,v in pairs(windower.ffxi.get_mob_array()) do
-            if string.find(v.name:lower(),san_targ:lower()) and (v.valid_target or v.id == windower.ffxi.get_player().id) then
+            if string.find(v.name:lower(),san_targ:lower()) and (v.valid_target or v.id == windower.ffxi.get_player().id) then -- Malformed pattern somehow
                 -- Handling for whether it's a monster or not
                 if v.is_npc and v.spawn_type ~= 14 and current_target then
                     if v.id == current_target.id then
@@ -114,7 +108,7 @@ function target_make(targets)
         target_type = 'Ally'
         local party = windower.ffxi.get_party()
         for i,v in pairs(party) do
-            if v.name == target.name then
+            if type(v) == 'table' and v.name == target.name then
                 if i:sub(1,1) == 'p' then
                     if i:sub(1,2) == 'p0' then
                         target_type = 'Self'
